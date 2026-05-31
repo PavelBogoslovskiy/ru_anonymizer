@@ -1,0 +1,37 @@
+anonymizers:
+
+  PERSON:
+    enabled: true
+    provider: ollama
+    model: qwen3:8b
+    batch_size: 20
+
+  ORG:
+    enabled: true
+    provider: ollama
+    model: qwen3:8b
+    similarity_threshold: 0.75
+    batch_size: 20
+
+  EMAIL:
+    enabled: true
+    mode: preserve_domain
+
+  ADDRESS:
+    enabled: true
+    mode: full
+
+  PHONE:
+    enabled: true
+
+  DATE:
+    enabled: true
+
+  MONEY:
+    enabled: true
+
+  DOC_ID:
+    enabled: true
+
+  LOC:
+    enabled: true

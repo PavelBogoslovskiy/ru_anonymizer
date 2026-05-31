@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="card-header">История анонимизаций</div>
+  <div class="card-body">
+    <ul class="list-group">
+      {% if history %}
+        {% for h in history %}
+          <li class="list-group-item">
+            <a href="{% url 'core:history_detail' h.pk %}">{{ h.title|default:"(без заголовка)" }}</a>
+            <div class="text-muted small">{{ h.created_at }}</div>
+          </li>
+        {% endfor %}
+      {% else %}
+        <li class="list-group-item text-muted">История пуста</li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

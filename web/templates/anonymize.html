@@ -1,0 +1,875 @@
+{% extends "base.html" %}
+{% load tz %}
+{% block content %}
+<style>
+/* Цвета для подсветки разных типов сущностей */
+.entity-highlight {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: default;
+  transition: all 0.15s ease;
+}
+.entity-highlight:hover {
+  filter: brightness(0.95);
+  transform: scale(1.02);
+}
+.entity-PERSON { background-color: #fce7f3; color: #be185d; }
+.entity-ORG { background-color: #dbeafe; color: #1e40af; }
+.entity-ADDRESS { background-color: #d1fae5; color: #065f46; }
+.entity-DOC_ID { background-color: #fef3c7; color: #92400e; }
+.entity-MONEY { background-color: #ede9fe; color: #5b21b6; }
+.entity-PHONE { background-color: #ffedd5; color: #c2410c; }
+.entity-DATE { background-color: #cffafe; color: #0e7490; }
+.entity-EMAIL { background-color: #fce7f3; color: #9d174d; }
+.entity-LOC { background-color: #dcfce7; color: #166534; }
+.entity-UNKNOWN { background-color: #f1f5f9; color: #475569; }
+
+.result-display {
+  min-height: 400px;
+  max-height: 600px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background-color: #fafafa;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.entity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+.entity-legend-item {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Панель истории */
+.history-panel {
+  transition: all 0.3s ease;
+}
+.history-panel.collapsed {
+  display: none;
+}
+.main-panel {
+  transition: all 0.3s ease;
+}
+.toggle-history-btn {
+  position: fixed;
+  right: 20px;
+  top: 80px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border-radius: 8px;
+}
+
+/* Кнопки действий */
+.action-btn-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Параметры анонимизации */
+.params-section {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+}
+
+.form-check-inline {
+  background: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
+}
+
+.form-check-inline:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.form-check-input:checked + .form-check-label {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+/* Индикатор загрузки */
+.loading-overlay {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: white;
+  padding: 16px 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.loading-overlay.d-none {
+  display: none !important;
+}
+
+/* Текстовые поля */
+textarea.form-control {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+/* История */
+.history-item {
+  cursor: pointer;
+  border-radius: 8px !important;
+  margin-bottom: 8px;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.history-item:last-child {
+  margin-bottom: 0;
+}
+
+.history-item:hover {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+</style>
+
+<!-- Кнопка показа/скрытия истории -->
+<button id="toggle-history" class="btn btn-primary toggle-history-btn" title="Показать/скрыть историю">
+  <span id="toggle-icon">📋</span> <span id="toggle-text">История</span>
+</button>
+
+<div class="row g-3">
+  <div class="col-lg-8 main-panel" id="main-panel">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Анонимизация текста</span>
+      </div>
+      <div class="card-body">
+        <form method="post" id="anonymize-form" enctype="multipart/form-data">
+          {% csrf_token %}
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Исходный текст <small class="text-muted" id="entities-hint"></small></label>
+              <!-- Подсвеченный текст (показывается после анонимизации) -->
+              <div id="original-display" class="result-display {% if not original_text %}d-none{% endif %}"></div>
+              <!-- Textarea для ввода (скрывается после анонимизации если есть подсветка) -->
+              <textarea name="text" id="original-area" class="form-control {% if original_text %}d-none{% endif %}" rows="18" required>{{ original_text|default:"" }}</textarea>
+              <div class="mt-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="entity-legend" id="entity-legend"></div>
+                <div class="d-flex gap-2 align-items-center">
+                  <label class="btn btn-sm btn-outline-primary mb-0" for="file-upload" title="Загрузить текст из файла">
+                    📁 Загрузить .txt
+                  </label>
+                  <input type="file" id="file-upload" name="file" accept=".txt" class="d-none">
+                  <button type="button" id="edit-original-btn" class="btn btn-sm btn-outline-secondary {% if not original_text %}d-none{% endif %}">Редактировать</button>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Анонимизированный текст</label>
+              <textarea id="result-area" class="form-control" rows="18" readonly>{{ result_text|default:"" }}</textarea>
+              <div class="mt-2 action-btn-group">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyResult()">
+                  📋 Скопировать
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="saveResultToFile()">
+                  💾 Сохранить .txt
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3 params-section">
+            <label class="form-label mb-2">Параметры анонимизации</label>
+            <div class="d-flex flex-wrap gap-2">
+              {% for label, label_name in labels_with_names %}
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input"
+                         type="checkbox"
+                         name="labels"
+                         id="lbl_{{ label }}"
+                         value="{{ label }}"
+                         {% if label in enabled_labels %}checked{% endif %}>
+                  <label class="form-check-label" for="lbl_{{ label }}">{{ label_name }}</label>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-primary" type="submit" id="anonymize-btn">
+              <span class="btn-text">Анонимизировать</span>
+              <span class="btn-loading d-none">
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                Обработка...
+              </span>
+            </button>
+            <button id="save-settings" type="button" class="btn btn-outline-secondary btn-sm">Сохранить параметры</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#settingsModal">
+              ⚙️ Расширенные настройки
+            </button>
+            <div id="save-msg" class="ms-2 text-success" style="display:none">Сохранено</div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Компактная плашка загрузки -->
+  <div id="loading-overlay" class="loading-overlay d-none">
+    <div class="spinner-border spinner-border-sm text-primary" role="status">
+      <span class="visually-hidden">Загрузка...</span>
+    </div>
+    <span class="text-muted">Анонимизация...</span>
+  </div>
+
+  <!-- Панель истории (сворачиваемая) -->
+  <div class="col-lg-4 history-panel" id="history-panel">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>История <span class="badge bg-secondary ms-2">{{ history_items|length }}</span></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="close-history" title="Скрыть историю">✕</button>
+      </div>
+      <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+        <ul class="list-group" id="history-list">
+          {% for it in history_items %}
+            <li class="list-group-item history-item d-flex justify-content-between align-items-start" data-payload="{{ it.payload }}" data-pk="{{ it.obj.id }}">
+              <div class="me-2 flex-grow-1" style="min-width:0;">
+                <div class="fw-bold text-truncate">{{ it.obj.title|default:"(без заголовка)" }}</div>
+                <div class="text-muted small">{{ it.obj.created_at|localtime|date:"Y-m-d H:i:s" }}</div>
+              </div>
+              <div class="ms-2">
+                  {% if it.obj.user_id == user.id %}
+                    <button class="btn btn-sm btn-danger delete-history" data-pk="{{ it.obj.id }}" data-delete-url="{% url 'core:delete_history' it.obj.id %}">Удалить</button>
+                  {% else %}
+                    <button class="btn btn-sm btn-outline-secondary" disabled title="Нельзя удалять записи другого пользователя">Удалить</button>
+                  {% endif %}
+              </div>
+            </li>
+          {% empty %}
+            <li class="list-group-item text-muted">История пуста</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно настроек -->
+<div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="settingsModalLabel">⚙️ Расширенные настройки</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Настройки ADDRESS -->
+        <div class="mb-4 settings-address-section" style="display: none;">
+          <label class="form-label fw-semibold">📍 Режим анонимизации адресов</label>
+          <div class="d-flex flex-wrap gap-3 mt-2">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" 
+                     name="address_mode" value="full" id="modal_address_full"
+                     {% if address_mode == "full" or not address_mode %}checked{% endif %}>
+              <label class="form-check-label" for="modal_address_full">
+                <strong>Полная замена</strong>
+                <small class="text-muted d-block">Заменяет весь адрес</small>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" 
+                     name="address_mode" value="part" id="modal_address_part"
+                     {% if address_mode == "part" %}checked{% endif %}>
+              <label class="form-check-label" for="modal_address_part">
+                <strong>Частичная</strong>
+                <small class="text-muted d-block">Только номера</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Настройки EMAIL -->
+        <div class="mb-4 settings-email-section" style="display: none;">
+          <label class="form-label fw-semibold">📧 Режим анонимизации email</label>
+          <div class="d-flex flex-wrap gap-3 mt-2">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" 
+                     name="email_mode" value="preserve_domain" id="modal_email_preserve"
+                     {% if email_mode == "preserve_domain" or not email_mode %}checked{% endif %}>
+              <label class="form-check-label" for="modal_email_preserve">
+                <strong>Сохранить домен</strong>
+                <small class="text-muted d-block">user@domain.ru → random@domain.ru</small>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" 
+                     name="email_mode" value="randomize_domain" id="modal_email_randomize"
+                     {% if email_mode == "randomize_domain" %}checked{% endif %}>
+              <label class="form-check-label" for="modal_email_randomize">
+                <strong>Полная замена</strong>
+                <small class="text-muted d-block">Случайный email</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Плейсхолдер когда ничего не выбрано -->
+        <div class="settings-placeholder text-muted text-center py-4">
+          <p class="mb-2">🔍 Нет доступных настроек</p>
+          <small>Выберите <strong>Адрес</strong> или <strong>Email</strong> в параметрах анонимизации, чтобы настроить режим их замены.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="saveModalSettings">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Данные сущностей для подсветки в ОРИГИНАЛЬНОМ тексте (из сервера)
+const ORIGINAL_ENTITIES = {{ original_entities_json|safe }};
+// Нормализуем переносы строк: \r\n -> \n для корректного совпадения позиций
+const ORIGINAL_TEXT = (document.getElementById('original-area').value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+// Названия меток для легенды (из сервера)
+const LABEL_NAMES = {{ label_names_json|safe }};
+
+// Функция для экранирования HTML и преобразования переносов строк
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  // Преобразуем переносы строк в <br> для корректного отображения
+  return div.innerHTML.replace(/\n/g, '<br>');
+}
+
+// Функция для подсветки текста с сущностями
+function renderHighlightedText(text, entities) {
+  if (!text) return '';
+  if (!entities || entities.length === 0) {
+    return escapeHtml(text);
+  }
+
+  // Сортируем сущности по позиции начала, затем по длине (более длинные первыми)
+  const sorted = [...entities].sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    return (b.end - b.start) - (a.end - a.start);
+  });
+  
+  let result = '';
+  let lastEnd = 0;
+  const usedLabels = new Set();
+
+  for (const ent of sorted) {
+    // Пропускаем пересекающиеся сущности (если текущая начинается раньше конца предыдущей)
+    if (ent.start < lastEnd) {
+      continue;
+    }
+    
+    // Добавляем текст до сущности
+    if (ent.start > lastEnd) {
+      result += escapeHtml(text.substring(lastEnd, ent.start));
+    }
+    
+    // Добавляем подсвеченную сущность
+    const label = ent.label || 'UNKNOWN';
+    usedLabels.add(label);
+    const entityText = text.substring(ent.start, ent.end);
+    const labelName = LABEL_NAMES[label] || label;
+    result += `<span class="entity-highlight entity-${label}" title="${labelName}">${escapeHtml(entityText)}</span>`;
+    
+    lastEnd = ent.end;
+  }
+
+  // Добавляем остаток текста
+  if (lastEnd < text.length) {
+    result += escapeHtml(text.substring(lastEnd));
+  }
+
+  // Обновляем легенду
+  renderLegend(usedLabels);
+
+  return result;
+}
+
+// Функция для отрисовки легенды
+function renderLegend(usedLabels) {
+  const legend = document.getElementById('entity-legend');
+  if (!legend) return;
+  
+  legend.innerHTML = '';
+  for (const label of usedLabels) {
+    const item = document.createElement('span');
+    item.className = `entity-legend-item entity-${label}`;
+    item.textContent = LABEL_NAMES[label] || label;
+    legend.appendChild(item);
+  }
+}
+
+// Переключение между режимами просмотра и редактирования
+function showHighlightMode(text, entities) {
+  const originalDisplay = document.getElementById('original-display');
+  const originalArea = document.getElementById('original-area');
+  const editBtn = document.getElementById('edit-original-btn');
+  const hint = document.getElementById('entities-hint');
+  
+  if (originalDisplay && originalArea) {
+    originalDisplay.classList.remove('d-none');
+    originalArea.classList.add('d-none');
+    editBtn.classList.remove('d-none');
+    
+    if (entities && entities.length > 0) {
+      originalDisplay.innerHTML = renderHighlightedText(text, entities);
+      hint.textContent = '(найдено сущностей: ' + entities.length + ')';
+    } else {
+      originalDisplay.innerHTML = escapeHtml(text);
+      hint.textContent = '(сущности не найдены)';
+    }
+  }
+}
+
+function showEditMode() {
+  const originalDisplay = document.getElementById('original-display');
+  const originalArea = document.getElementById('original-area');
+  const editBtn = document.getElementById('edit-original-btn');
+  const hint = document.getElementById('entities-hint');
+  const legend = document.getElementById('entity-legend');
+  
+  if (originalDisplay && originalArea) {
+    originalDisplay.classList.add('d-none');
+    originalArea.classList.remove('d-none');
+    editBtn.classList.add('d-none');
+    hint.textContent = '';
+    legend.innerHTML = '';
+    originalArea.focus();
+  }
+}
+
+// Инициализация подсветки при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+  // Показываем подсветку если есть текст
+  if (ORIGINAL_TEXT) {
+    showHighlightMode(ORIGINAL_TEXT, ORIGINAL_ENTITIES);
+  }
+  
+  // Кнопка "Редактировать"
+  const editBtn = document.getElementById('edit-original-btn');
+  if (editBtn) {
+    editBtn.addEventListener('click', showEditMode);
+  }
+  
+  // Показ индикатора загрузки при отправке формы
+  const form = document.getElementById('anonymize-form');
+  const anonymizeBtn = document.getElementById('anonymize-btn');
+  const loadingOverlay = document.getElementById('loading-overlay');
+  
+  if (form && anonymizeBtn) {
+    form.addEventListener('submit', function() {
+      // Показываем индикатор загрузки
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('d-none');
+      }
+      // Меняем состояние кнопки
+      anonymizeBtn.disabled = true;
+      anonymizeBtn.querySelector('.btn-text').classList.add('d-none');
+      anonymizeBtn.querySelector('.btn-loading').classList.remove('d-none');
+    });
+  }
+
+  // Загрузка файла
+  const fileInput = document.getElementById('file-upload');
+  if (fileInput) {
+    fileInput.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      // Проверяем тип файла
+      if (!file.name.toLowerCase().endsWith('.txt')) {
+        alert('Пожалуйста, выберите файл с расширением .txt');
+        fileInput.value = '';
+        return;
+      }
+      
+      // Проверяем размер файла (макс 1 МБ)
+      if (file.size > 1024 * 1024) {
+        alert('Файл слишком большой. Максимальный размер: 1 МБ');
+        fileInput.value = '';
+        return;
+      }
+      
+      // Читаем файл
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const text = event.target.result;
+        const originalArea = document.getElementById('original-area');
+        const originalDisplay = document.getElementById('original-display');
+        const editBtn = document.getElementById('edit-original-btn');
+        
+        // Показываем textarea с содержимым файла
+        originalArea.value = text;
+        originalArea.classList.remove('d-none');
+        originalDisplay.classList.add('d-none');
+        editBtn.classList.add('d-none');
+        
+        // Очищаем предыдущую подсветку
+        document.getElementById('entity-legend').innerHTML = '';
+        document.getElementById('entities-hint').textContent = '';
+      };
+      reader.onerror = function() {
+        alert('Ошибка при чтении файла');
+      };
+      reader.readAsText(file, 'UTF-8');
+      
+      // Сбрасываем input чтобы можно было загрузить тот же файл снова
+      fileInput.value = '';
+    });
+  }
+  
+  // Управление сворачиванием истории
+  setupHistoryToggle();
+  
+  // Управление видимостью настроек в модальном окне
+  setupModalSettings();
+});
+
+// Функции для сворачивания/разворачивания истории
+function setupHistoryToggle() {
+  const toggleBtn = document.getElementById('toggle-history');
+  const closeBtn = document.getElementById('close-history');
+  const historyPanel = document.getElementById('history-panel');
+  const mainPanel = document.getElementById('main-panel');
+  const toggleText = document.getElementById('toggle-text');
+  const toggleIcon = document.getElementById('toggle-icon');
+  
+  // Загружаем состояние из localStorage
+  const isHidden = localStorage.getItem('historyHidden') === 'true';
+  if (isHidden) {
+    hideHistory();
+  }
+  
+  // Кнопка показа/скрытия в углу
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function() {
+      if (historyPanel.classList.contains('collapsed')) {
+        showHistory();
+      } else {
+        hideHistory();
+      }
+    });
+  }
+  
+  // Кнопка закрытия в карточке истории
+  if (closeBtn) {
+    closeBtn.addEventListener('click', hideHistory);
+  }
+  
+  function hideHistory() {
+    historyPanel.classList.add('collapsed');
+    // Расширяем основной блок на всю ширину
+    mainPanel.classList.remove('col-lg-8');
+    mainPanel.classList.add('col-12');
+    toggleText.textContent = 'История';
+    toggleIcon.textContent = '📋';
+    toggleBtn.classList.remove('btn-secondary');
+    toggleBtn.classList.add('btn-primary');
+    localStorage.setItem('historyHidden', 'true');
+  }
+  
+  function showHistory() {
+    historyPanel.classList.remove('collapsed');
+    // Возвращаем стандартную раскладку
+    mainPanel.classList.remove('col-12');
+    mainPanel.classList.add('col-lg-8');
+    toggleText.textContent = 'Скрыть';
+    toggleIcon.textContent = '✕';
+    toggleBtn.classList.remove('btn-primary');
+    toggleBtn.classList.add('btn-secondary');
+    localStorage.setItem('historyHidden', 'false');
+  }
+}
+
+// Получаем значение куки по имени (для CSRF токена)
+function getCookie(name) {
+  const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return v ? v.pop() : '';
+}
+
+const CSRFTOKEN = getCookie('csrftoken');
+
+function copyResult(){
+  const res = document.getElementById('result-area').value || '';
+  navigator.clipboard.writeText(res).then(()=>{
+    // Показываем уведомление об успехе
+    showToast('Текст скопирован в буфер обмена');
+  }, ()=>{/* ignore */});
+}
+
+function saveResultToFile() {
+  const res = document.getElementById('result-area').value || '';
+  if (!res.trim()) {
+    showToast('Нет текста для сохранения', 'warning');
+    return;
+  }
+  
+  // Создаем Blob с текстом
+  const blob = new Blob([res], { type: 'text/plain;charset=utf-8' });
+  
+  // Создаем ссылку для скачивания
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  
+  // Генерируем имя файла с датой
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
+  a.download = `anonymized_${dateStr}_${timeStr}.txt`;
+  
+  // Скачиваем файл
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  showToast('Файл сохранён');
+}
+
+// Простое всплывающее уведомление
+function showToast(message, type = 'success') {
+  // Удаляем предыдущее уведомление если есть
+  const existing = document.querySelector('.toast-notification');
+  if (existing) existing.remove();
+  
+  const toast = document.createElement('div');
+  toast.className = 'toast-notification';
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: ${type === 'success' ? '#10b981' : '#f59e0b'};
+    color: white;
+    border-radius: 8px;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 9999;
+    animation: slideIn 0.3s ease;
+  `;
+  toast.textContent = message;
+  
+  // Добавляем анимацию
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  `;
+  document.head.appendChild(style);
+  
+  document.body.appendChild(toast);
+  
+  // Удаляем через 2 секунды
+  setTimeout(() => {
+    toast.style.animation = 'slideIn 0.3s ease reverse';
+    setTimeout(() => toast.remove(), 300);
+  }, 2000);
+}
+
+document.querySelectorAll('.history-item').forEach(function(el){
+  el.addEventListener('click', function(){
+    // Читаем данные из base64 атрибута
+    let data = null;
+    try {
+      const b64 = el.getAttribute('data-payload') || '';
+      if (b64) {
+        const str = atob(b64);
+        // Декодируем UTF-8
+        const decoded = decodeURIComponent(escape(str));
+        data = JSON.parse(decoded);
+      }
+    } catch (e) {
+      data = { original: el.getAttribute('data-original') || '', result: el.getAttribute('data-result') || '', entities: [] };
+    }
+
+    const originalArea = document.getElementById('original-area');
+    const resultArea = document.getElementById('result-area');
+    
+    if (originalArea && data && data.original) originalArea.value = data.original;
+    if (resultArea && data && data.result) resultArea.value = data.result;
+    
+    // Показываем подсветку из сохранённых данных истории
+    if (data && data.original) {
+      const entities = data.entities || [];
+      showHighlightMode(data.original, entities);
+    }
+  });
+});
+
+// Обработчики удаления записей истории
+document.querySelectorAll('.delete-history').forEach(function(btn){
+  btn.addEventListener('click', function(e){
+    e.stopPropagation();
+    const li = btn.closest('li.history-item');
+    const pk = li.getAttribute('data-pk');
+    if (!pk) return;
+    // Берем URL удаления из атрибута кнопки
+    const explicitUrl = btn.getAttribute('data-delete-url') || li.getAttribute('data-delete-url');
+    const deleteUrl = explicitUrl || ('{% url "core:delete_history" 0 %}'.replace('/0/', '/' + pk + '/'));
+    fetch(deleteUrl, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': CSRFTOKEN,
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    }).then(r => {
+      if (r.status === 404) {
+        // Уже удалено на сервере
+        return { ok: false, missing: true };
+      }
+      if (!r.ok) {
+        return r.text().then(t => { throw new Error(t || 'HTTP ' + r.status); });
+      }
+      return r.json().catch(() => { throw new Error('Invalid JSON response'); });
+    }).then(res => {
+      if ((res && res.ok) || (res && res.missing)) {
+        // Удаляем элемент и обновляем счетчик
+        li.remove();
+        const badge = document.querySelector('.card-header .badge');
+        if (badge) {
+          const n = parseInt(badge.textContent || '0', 10) - 1;
+          badge.textContent = Math.max(0, n);
+        }
+      } else {
+        alert('Не удалось удалить запись');
+      }
+    }).catch(err => {
+      console.error('Delete failed', err);
+      alert('Не удалось удалить запись: ' + (err.message || 'сетевая ошибка'));
+    });
+  });
+});
+
+// Сохранение настроек через AJAX
+document.getElementById('save-settings').addEventListener('click', function(){
+  const checkboxes = document.querySelectorAll('input[name="labels"]');
+  const selected = [];
+  checkboxes.forEach(cb => { if (cb.checked) selected.push(cb.value); });
+
+  // Формируем параметры запроса
+  const params = new URLSearchParams();
+  selected.forEach(v => params.append('enabled_labels', v));
+
+  fetch('{% url "core:settings" %}', {
+    method: 'POST',
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRFToken': CSRFTOKEN,
+    },
+    body: params
+  }).then(r => {
+    if (r.ok) {
+      const msg = document.getElementById('save-msg');
+      msg.style.display = 'inline';
+      setTimeout(()=> msg.style.display = 'none', 1500);
+    } else {
+      alert('Не удалось сохранить настройки');
+    }
+  }).catch(()=> alert('Ошибка сети'));
+});
+
+// Функция для управления настройками в модальном окне
+function setupModalSettings() {
+  const addressCheckbox = document.getElementById('lbl_ADDRESS');
+  const emailCheckbox = document.getElementById('lbl_EMAIL');
+  const addressSection = document.querySelector('.settings-address-section');
+  const emailSection = document.querySelector('.settings-email-section');
+  const placeholder = document.querySelector('.settings-placeholder');
+
+  function updateModalSections() {
+    const addressChecked = addressCheckbox && addressCheckbox.checked;
+    const emailChecked = emailCheckbox && emailCheckbox.checked;
+
+    if (addressSection) {
+      addressSection.style.display = addressChecked ? 'block' : 'none';
+    }
+    if (emailSection) {
+      emailSection.style.display = emailChecked ? 'block' : 'none';
+    }
+    if (placeholder) {
+      placeholder.style.display = (!addressChecked && !emailChecked) ? 'block' : 'none';
+    }
+  }
+
+  // Обновляем при изменении чекбоксов
+  if (addressCheckbox) {
+    addressCheckbox.addEventListener('change', updateModalSections);
+  }
+  if (emailCheckbox) {
+    emailCheckbox.addEventListener('change', updateModalSections);
+  }
+
+  // Обновляем при открытии модального окна
+  const modal = document.getElementById('settingsModal');
+  if (modal) {
+    modal.addEventListener('show.bs.modal', updateModalSections);
+  }
+
+  // Начальное состояние
+  updateModalSections();
+}
+
+// Сохранение расширенных настроек из модального окна
+document.getElementById('saveModalSettings').addEventListener('click', function(){
+  const checkboxes = document.querySelectorAll('input[name="labels"]');
+  const selected = [];
+  checkboxes.forEach(cb => { if (cb.checked) selected.push(cb.value); });
+
+  // Получаем значения mode из модального окна
+  const addressMode = document.querySelector('input[name="address_mode"]:checked');
+  const emailMode = document.querySelector('input[name="email_mode"]:checked');
+
+  // Формируем параметры запроса
+  const params = new URLSearchParams();
+  selected.forEach(v => params.append('enabled_labels', v));
+  if (addressMode) params.append('address_mode', addressMode.value);
+  if (emailMode) params.append('email_mode', emailMode.value);
+
+  fetch('{% url "core:settings" %}', {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': CSRFTOKEN,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params
+  }).then(r => {
+    if (r.ok) {
+      // Закрываем модальное окно
+      const modal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
+      if (modal) modal.hide();
+      showToast('Настройки сохранены');
+    } else {
+      alert('Не удалось сохранить настройки');
+    }
+  }).catch(()=> alert('Ошибка сети'));
+});
+</script>
+{% endblock %}

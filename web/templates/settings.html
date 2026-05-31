@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">
+        <h5 class="mb-0">⚙️ Настройки анонимизации</h5>
+      </div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+
+          <!-- Основные сущности -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Сущности для анонимизации</label>
+            <p class="text-muted small mb-2">Выберите типы данных, которые нужно анонимизировать</p>
+            <div class="row g-2">
+              {% for value, label in form.enabled_labels.field.choices %}
+              <div class="col-6 col-md-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" 
+                         name="enabled_labels" value="{{ value }}" id="label_{{ value }}"
+                         {% if value in enabled_labels %}checked{% endif %}>
+                  <label class="form-check-label" for="label_{{ value }}">
+                    {{ label }}
+                  </label>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <hr>
+
+          <!-- Настройки ADDRESS -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">📍 Режим анонимизации адресов</label>
+            <div class="d-flex flex-wrap gap-4 mt-2">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" 
+                       name="address_mode" value="full" id="address_full"
+                       {% if address_mode == "full" or not address_mode %}checked{% endif %}>
+                <label class="form-check-label" for="address_full">
+                  <strong>Полная замена</strong>
+                  <small class="text-muted d-block">Заменяет весь адрес на случайный</small>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" 
+                       name="address_mode" value="part" id="address_part"
+                       {% if address_mode == "part" %}checked{% endif %}>
+                <label class="form-check-label" for="address_part">
+                  <strong>Частичная</strong>
+                  <small class="text-muted d-block">Меняет только номера (дом, квартира)</small>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Настройки EMAIL -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">📧 Режим анонимизации email</label>
+            <div class="d-flex flex-wrap gap-4 mt-2">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" 
+                       name="email_mode" value="preserve_domain" id="email_preserve"
+                       {% if email_mode == "preserve_domain" or not email_mode %}checked{% endif %}>
+                <label class="form-check-label" for="email_preserve">
+                  <strong>Сохранить домен</strong>
+                  <small class="text-muted d-block">user@domain.ru → random@domain.ru</small>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" 
+                       name="email_mode" value="randomize_domain" id="email_randomize"
+                       {% if email_mode == "randomize_domain" %}checked{% endif %}>
+                <label class="form-check-label" for="email_randomize">
+                  <strong>Полная замена</strong>
+                  <small class="text-muted d-block">Генерирует случайный email</small>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <hr>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">✓ Сохранить</button>
+            <a class="btn btn-outline-secondary" href="{% url 'core:anonymize' %}">← Вернуться</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.form-check-label {
+    cursor: pointer;
+}
+.form-check {
+    padding-left: 1.75em;
+}
+</style>
+{% endblock %}

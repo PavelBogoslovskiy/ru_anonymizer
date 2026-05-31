@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card mx-auto" style="max-width:600px">
+  <div class="card-body">
+    <h4 class="card-title mb-3">Регистрация</h4>
+    {% if messages %}
+      {% for msg in messages %}
+        <div class="alert alert-{{ msg.tags|default:'info' }}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label">Имя пользователя</label>
+        <input name="username" class="form-control" required minlength="3" maxlength="30" value="{{ username|default:'' }}">
+        <div class="form-text">От 3 до 30 символов. Только буквы, цифры и символы @/./+/-/_</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Пароль</label>
+        <input name="password" type="password" class="form-control" required minlength="8">
+        <div class="form-text">Минимум 8 символов, должен содержать буквы и цифры</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Подтверждение пароля</label>
+        <input name="password_confirm" type="password" class="form-control" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Создать аккаунт</button>
+      <a class="btn btn-link" href="{% url 'login' %}">Уже есть аккаунт?</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
